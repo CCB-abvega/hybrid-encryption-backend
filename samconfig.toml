@@ -1,0 +1,42 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "ccb-hybrid-encryption-api"
+
+
+[dev.deploy.parameters]
+profile = "credicorpdev"
+stack_name = "ccb-hybrid-encryption-api"
+resolve_s3 = true
+s3_prefix = "ccb-hybrid-encryption-api"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
+image_repositories = []
+parameter_overrides = [
+    "EncryptedDekSecret=dev/ccb-encrypted-dek",
+    "CmkKmsArn=arn:aws:kms:us-east-1:908372656358:key/2ecddfb0-6186-403d-b4b9-8e1bfef1616b",
+    "LayerAnnotationsCore=CCBCoreAnnotationsLayer:52",
+    "LayerToolbox=CCBItProyToolboxLayer:350",
+    "UserPool=us-east-1_gFYIlZpoC",
+    "ApiDomain=ccbawslayerdev.credicorpbank.com",
+    "ApiStage=dev",
+]
+# QA
+# [qa.deploy.parameters]
+# profile = "credicorpqa"
+# stack_name = "ccb-hybrid-encryption-api"
+# resolve_s3 = true
+# s3_prefix = "ccb-hybrid-encryption-api"
+# region = "us-east-1"
+# confirm_changeset = true
+# capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
+# image_repositories = []
+# parameter_overrides = [
+#     "EncryptedDekSecret=qa/ccb-encrypted-dek",
+#     "CmkKmsArn=arn:aws:kms:us-east-1:632357775273:key/4b6238ed-1afc-402b-bec1-3367c62dbeda",
+#     "LayerAnnotationsCore=CCBCoreAnnotationsLayer:11",
+#     "LayerToolbox=CCBItProyToolboxLayer:37",
+#     "UserPool=us-east-1_tRWvjXt7E",
+#     "ApiDomain=ccbawslayerqa.credicorpbank.com",
+#     "ApiStage=qa",
+# ]

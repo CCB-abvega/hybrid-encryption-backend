@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform:
+  - AWS::LanguageExtensions
+  - AWS::Serverless-2016-10-31
+
+Parameters:
+  EncryptedDekSecret:
+    Type: String
+    Description: Secret name of encrypted dek
+  CmkKmsArn:
+    Type: String
+    Description: ARN of CMK key to encrypt the environment variables
+  LayerAnnotationsCore:
+    Type: String
+    Description: Layer version of core annotations
+  LayerToolbox:
+    Type: String
+    Description: Layer version of toolbox
+  UserPool:
+    Type: String
+    Description: Cognito user pool
+  ApiStage:
+    Type: String
+    Description: API stage
+  ApiDomain:
+    Type: String
+    Description: API domain
+
+Resources:
+  CCBHybridEncryptionApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref ApiStage
+      Auth:
+        DefaultAuthorizer: CCBCognitoAuthorizer
+        Authorizers:
+          CCBCognitoAuthorizer:
+            UserPoolArn: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPool}
+            Identity:
+              Header: Authorization
+              ReauthorizeEvery: 30
+            ProviderARNs:
+              - !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPool}
+            AuthorizationScopes:
+              - "openid"
+              - "ccb.test.com/read"
+    Cors:
+      AllowOrigins: "'*'"
+      AllowHeaders: "'Authorization,Content-Type'"
+      AllowMethods: "'GET,POST,OPTIONS,PUT'"
+      MaxAge: 600
+
+  CCBHybridEncryptionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CCB_LAMDBA_GET_ENCRYPTION_TEST_DATA
+      KmsKeyArn: !Ref CmkKmsArn
+      CodeUri: ./src/test_function
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          ENCRYPTED_DEK_SECRET: !Ref EncryptedDekSecret
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${LayerAnnotationsCore}
+        - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${LayerToolbox}
+        - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV2:69
+      Architectures:
+        - x86_64
+      MemorySize: 512
+      Timeout: 30
+      Role: !GetAtt CCBPOCFunctionRole.Arn
+      Events:
+        CCBDataDecryptr:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CCBHybridEncryptionApi
+            Path: /obtain-data
+            Method: post
+
+  CCBPrivateKeyValidatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CCB_LAMDBA_GET_PUBLIC_KEY
+      KmsKeyArn: !Ref CmkKmsArn
+      CodeUri: ./src/get_public_key
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          ENCRYPTED_DEK_SECRET: !Ref EncryptedDekSecret
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${LayerAnnotationsCore}
+        - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${LayerToolbox}
+        - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV2:69
+      Architectures:
+        - x86_64
+      MemorySize: 512
+      Timeout: 30
+      Role: !GetAtt CCBPOCFunctionRole.Arn
+      Events:
+        CCBDataDecryptr:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CCBHybridEncryptionApi
+            Path: /get-key
+            Method: post
+
+
+  CCBPOCFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::Region}-CCB_LAMBDA_POC_ROLE1
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+      Policies:
+        - PolicyName: AllowKMSUsageOnPOCLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "kms:GenerateDataKey"
+                  - "kms:Decrypt"
+                  - "kms:Encrypt"
+                  - "kms:GetPublicKey"
+                Resource:
+                  - !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/2ecddfb0-6186-403d-b4b9-8e1bfef1616b
+                  - !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/5a353b2a-00fa-45ee-a552-974f4389cb83
+        - PolicyName: AllowSecretsManagerUsageOnPOCLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "secretsmanager:PutSecretValue"
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:dev/ccb-encrypted-dek
+        - PolicyName: AllowDynamoDBUsageOnPOCLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Decryption_keys
+
+
+  BasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Properties:
+      DomainName: !Ref ApiDomain
+      BasePath: encryption-api
+      RestApiId: !Ref CCBHybridEncryptionApi
+      Stage: !Ref CCBHybridEncryptionApi.Stage
+
+Outputs:
+  CCBHybridEncryptionFunctionArn:
+    Description: "CCBHybridEncryptionFunctionLambda Function ARN"
+    Value: !GetAtt CCBHybridEncryptionFunction.Arn
+  StackNameNested:
+    Description: "Stack nested name of this stack"
+    Value: !Sub ${AWS::StackName}
+# QA kms arn - arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/4b6238ed-1afc-402b-bec1-3367c62dbeda
+# QA Authorizer arn - arn:aws:cognito-idp:us-east-1:632357775273:userpool/us-east-1_tRWvjXt7E
